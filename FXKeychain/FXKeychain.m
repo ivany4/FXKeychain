@@ -94,6 +94,11 @@
 
 #endif
 
+#define kDefaultStorageKey @"FXKeychain"
+
+@interface FXKeychain ()
+@property (nonatomic, strong) NSMutableArray *defaultStoredKeys;
+@end
 
 @implementation FXKeychain
 
@@ -121,7 +126,7 @@
 {
     return [self initWithService:service
                      accessGroup:accessGroup
-                   accessibility:FXKeychainAccessibleWhenUnlocked];
+                   accessibility:FXKeychainAccessibleWhenUnlockedThisDeviceOnly];
 }
 
 - (id)initWithService:(NSString *)service
@@ -137,8 +142,86 @@
     return self;
 }
 
-- (NSData *)dataForKey:(id)key
+- (NSMutableArray *)defaultStoredKeys
 {
+    if (!_defaultStoredKeys) {
+        NSArray *keys = [[NSUserDefaults standardUserDefaults] objectForKey:kDefaultStorageKey];
+        if (!keys || ![keys isKindOfClass:[NSArray class]]) {
+            keys = [NSArray array];
+            [[NSUserDefaults standardUserDefaults] setObject:keys forKey:kDefaultStorageKey];
+        }
+        _defaultStoredKeys = [keys mutableCopy];
+    }
+    return _defaultStoredKeys;
+}
+
+- (void)syncDefaultStoredKeys
+{
+    if (_defaultStoredKeys) {
+        [[NSUserDefaults standardUserDefaults] setObject:[_defaultStoredKeys copy] forKey:kDefaultStorageKey];
+        [[NSUserDefaults standardUserDefaults] synchronize];
+    }
+}
+
+- (void)addStoredKey:(id)key
+{
+    if (![self.defaultStoredKeys containsObject:key]) {
+        [self.defaultStoredKeys addObject:key];
+        [self syncDefaultStoredKeys];
+    }
+}
+
+- (void)removeStoredKey:(id)key
+{
+    [self.defaultStoredKeys removeObject:key];
+    [self syncDefaultStoredKeys];
+}
+
+- (BOOL)dataExistsForKey:(id)key secured:(BOOL)secured
+{
+    //This can be the case when creating/updating secured key, or updating from secured key to unsecured key
+    if ([self.defaultStoredKeys containsObject:key]) {
+        return YES;
+    }
+    else if (!secured) {
+        //generate query
+        NSMutableDictionary *query = [NSMutableDictionary dictionary];
+        if ([self.service length]) query[(__bridge NSString *)kSecAttrService] = self.service;
+        query[(__bridge NSString *)kSecClass] = (__bridge id)kSecClassGenericPassword;
+        query[(__bridge NSString *)kSecMatchLimit] = (__bridge id)kSecMatchLimitOne;
+        query[(__bridge NSString *)kSecReturnData] = (__bridge id)kCFBooleanFalse;
+        query[(__bridge NSString *)kSecAttrAccount] = [key description];
+        
+        
+#if TARGET_OS_IPHONE && !TARGET_IPHONE_SIMULATOR
+        if ([_accessGroup length]) query[(__bridge NSString *)kSecAttrAccessGroup] = _accessGroup;
+#endif
+        
+        //check data
+        OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, NULL);
+        if (status != errSecSuccess && status != errSecItemNotFound)
+        {
+            NSLog(@"FXKeychain failed to retrieve data for key '%@', error: %ld", key, (long)status);
+        }
+        return status == errSecSuccess;
+    }
+    return NO;
+}
+
+- (NSData *)dataForKey:(id)key reason:(NSString *)reason
+{
+    if (reason != nil) {
+#if !TARGET_OS_IPHONE
+        [NSException raise:@"NSInvalidArgumentException" format:@"TouchID reason is available only for iOS"];
+        return nil;
+#endif
+        if (NSFoundationVersionNumber <= NSFoundationVersionNumber_iOS_7_1) {
+            [NSException raise:@"NSInvalidArgumentException" format:@"TouchID reason is available only for iOS 8+"];
+            return nil;
+        }
+    }
+    
+    
 	//generate query
     NSMutableDictionary *query = [NSMutableDictionary dictionary];
     if ([self.service length]) query[(__bridge NSString *)kSecAttrService] = self.service;
@@ -146,8 +229,12 @@
     query[(__bridge NSString *)kSecMatchLimit] = (__bridge id)kSecMatchLimitOne;
     query[(__bridge NSString *)kSecReturnData] = (__bridge id)kCFBooleanTrue;
     query[(__bridge NSString *)kSecAttrAccount] = [key description];
+    
 
 #if TARGET_OS_IPHONE && !TARGET_IPHONE_SIMULATOR
+    if (NSFoundationVersionNumber > NSFoundationVersionNumber_iOS_7_1 && reason) {
+        query[(__bridge NSString *)kSecUseOperationPrompt] = reason;
+    }
     
     if ([_accessGroup length]) query[(__bridge NSString *)kSecAttrAccessGroup] = _accessGroup;
     
@@ -165,7 +252,24 @@
 
 - (BOOL)setObject:(id)object forKey:(id)key
 {
+    return [self setObject:object forKey:key protectWithTouchID:NO];
+}
+
+- (BOOL)setObject:(id)object forKey:(id)key protectWithTouchID:(BOOL)protect
+{
     NSParameterAssert(key);
+    
+    
+    if (protect) {
+#if !TARGET_OS_IPHONE
+        [NSException raise:@"NSInvalidArgumentException" format:@"TouchID protection is available only for iOS"];
+        return NO;
+#endif
+        if (NSFoundationVersionNumber <= NSFoundationVersionNumber_iOS_7_1) {
+            [NSException raise:@"NSInvalidArgumentException" format:@"TouchID protection is available only for iOS 8+"];
+            return NO;
+        }
+    }
 
     //generate query
     NSMutableDictionary *query = [NSMutableDictionary dictionary];
@@ -173,15 +277,15 @@
     query[(__bridge NSString *)kSecClass] = (__bridge id)kSecClassGenericPassword;
     query[(__bridge NSString *)kSecAttrAccount] = [key description];
     
-#if TARGET_OS_IPHONE && !TARGET_IPHONE_SIMULATOR
+    NSError *error = nil;
     
+#if TARGET_OS_IPHONE && !TARGET_IPHONE_SIMULATOR
     if ([_accessGroup length]) query[(__bridge NSString *)kSecAttrAccessGroup] = _accessGroup;
     
 #endif
     
     //encode object
     NSData *data = nil;
-    NSError *error = nil;
     if ([(id)object isKindOfClass:[NSString class]])
     {
         //check that string data does not represent a binary plist
@@ -223,19 +327,44 @@
         //update values
         NSMutableDictionary *update = [@{(__bridge NSString *)kSecValueData: data} mutableCopy];
         
-#if TARGET_OS_IPHONE || __MAC_OS_X_VERSION_MIN_REQUIRED >= __MAC_10_9
-        
-        update[(__bridge NSString *)kSecAttrAccessible] = @[(__bridge id)kSecAttrAccessibleWhenUnlocked,
-                                                            (__bridge id)kSecAttrAccessibleAfterFirstUnlock,
-                                                            (__bridge id)kSecAttrAccessibleAlways,
-                                                            (__bridge id)kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
-                                                            (__bridge id)kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
-                                                            (__bridge id)kSecAttrAccessibleAlwaysThisDeviceOnly][self.accessibility];
-#endif
-        
         //write data
 		OSStatus status = errSecSuccess;
-		if ([self dataForKey:key])
+        
+        //Don't read item protected by TouchID, since it will bring the UI for authentication...
+#if TARGET_OS_IPHONE && !TARGET_IPHONE_SIMULATOR
+        BOOL authWithTouchID = NSFoundationVersionNumber > NSFoundationVersionNumber_iOS_7_1 && protect;
+#else
+        BOOL authWithTouchID = NO;
+#endif
+        BOOL dataExists = NO;
+        if (authWithTouchID) {
+            dataExists = [self dataExistsForKey:key secured:YES];
+            
+            CFErrorRef err = NULL;
+            SecAccessControlRef sacObject = SecAccessControlCreateWithFlags(kCFAllocatorDefault,
+                                                                            kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly,
+                                                                            kSecAccessControlUserPresence, &err);
+            if (sacObject == NULL || err != NULL) {
+                NSLog(@"FXKeychain failed to create access control object, error: %@", err);
+                return NO;
+            }
+            update[(__bridge NSString *)kSecAttrAccessControl] = (__bridge id)sacObject;
+        }
+        else {
+            dataExists = [self dataExistsForKey:key secured:NO];
+            
+#if TARGET_OS_IPHONE || __MAC_OS_X_VERSION_MIN_REQUIRED >= __MAC_10_9
+                
+                update[(__bridge NSString *)kSecAttrAccessible] = @[(__bridge id)kSecAttrAccessibleWhenUnlocked,
+                                                                    (__bridge id)kSecAttrAccessibleAfterFirstUnlock,
+                                                                    (__bridge id)kSecAttrAccessibleAlways,
+                                                                    (__bridge id)kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+                                                                    (__bridge id)kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+                                                                    (__bridge id)kSecAttrAccessibleAlwaysThisDeviceOnly][self.accessibility];
+#endif
+        }
+            
+        if (dataExists)
         {
 			//there's already existing data for this key, update it
 			status = SecItemUpdate((__bridge CFDictionaryRef)query, (__bridge CFDictionaryRef)update);
@@ -250,6 +379,15 @@
         {
             NSLog(@"FXKeychain failed to store data for key '%@', error: %ld", key, (long)status);
             return NO;
+        }
+        //Adding/updating new secure item
+        else if (authWithTouchID) {
+            [self addStoredKey:key];
+        }
+        //Updating from secure to insecure
+        else if (dataExists) {
+            //In case this item was previously secure, let's remove this flag
+            [self removeStoredKey:key];
         }
     }
     else if (self[key])
@@ -274,6 +412,9 @@
             NSLog(@"FXKeychain failed to delete data for key '%@', error: %ld", key, (long)status);
             return NO;
         }
+        else {
+            [self removeStoredKey:key];
+        }
     }
     return YES;
 }
@@ -290,7 +431,12 @@
 
 - (id)objectForKey:(id)key
 {
-    NSData *data = [self dataForKey:key];
+    return [self objectForKey:key reason:nil];
+}
+
+- (id)objectForKey:(id)key reason:(NSString *)reason
+{
+    NSData *data = [self dataForKey:key reason:reason];
     if (data)
     {
         id object = nil;
