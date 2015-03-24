@@ -16,5 +16,5 @@
     "ios": "4.3",
     "osx": "10.6"
   },
-  "frameworks": "Security"
+  "frameworks": "Security", "LocalAuthentication"
 }
