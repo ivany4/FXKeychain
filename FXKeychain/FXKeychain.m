@@ -96,9 +96,6 @@
 
 #define kDefaultStorageKey @"FXKeychain"
 
-@interface FXKeychain ()
-@property (nonatomic, strong) NSMutableArray *defaultStoredKeys;
-@end
 
 @implementation FXKeychain
 
@@ -140,72 +137,6 @@
         _accessibility = accessibility;
     }
     return self;
-}
-
-- (NSMutableArray *)defaultStoredKeys
-{
-    if (!_defaultStoredKeys) {
-        NSArray *keys = [[NSUserDefaults standardUserDefaults] objectForKey:kDefaultStorageKey];
-        if (!keys || ![keys isKindOfClass:[NSArray class]]) {
-            keys = [NSArray array];
-            [[NSUserDefaults standardUserDefaults] setObject:keys forKey:kDefaultStorageKey];
-        }
-        _defaultStoredKeys = [keys mutableCopy];
-    }
-    return _defaultStoredKeys;
-}
-
-- (void)syncDefaultStoredKeys
-{
-    if (_defaultStoredKeys) {
-        [[NSUserDefaults standardUserDefaults] setObject:[_defaultStoredKeys copy] forKey:kDefaultStorageKey];
-        [[NSUserDefaults standardUserDefaults] synchronize];
-    }
-}
-
-- (void)addStoredKey:(id)key
-{
-    if (![self.defaultStoredKeys containsObject:key]) {
-        [self.defaultStoredKeys addObject:key];
-        [self syncDefaultStoredKeys];
-    }
-}
-
-- (void)removeStoredKey:(id)key
-{
-    [self.defaultStoredKeys removeObject:key];
-    [self syncDefaultStoredKeys];
-}
-
-- (BOOL)dataExistsForKey:(id)key secured:(BOOL)secured
-{
-    //This can be the case when creating/updating secured key, or updating from secured key to unsecured key
-    if ([self.defaultStoredKeys containsObject:key]) {
-        return YES;
-    }
-    else if (!secured) {
-        //generate query
-        NSMutableDictionary *query = [NSMutableDictionary dictionary];
-        if ([self.service length]) query[(__bridge NSString *)kSecAttrService] = self.service;
-        query[(__bridge NSString *)kSecClass] = (__bridge id)kSecClassGenericPassword;
-        query[(__bridge NSString *)kSecMatchLimit] = (__bridge id)kSecMatchLimitOne;
-        query[(__bridge NSString *)kSecReturnData] = (__bridge id)kCFBooleanFalse;
-        query[(__bridge NSString *)kSecAttrAccount] = [key description];
-        
-        
-#if TARGET_OS_IPHONE && !TARGET_IPHONE_SIMULATOR
-        if ([_accessGroup length]) query[(__bridge NSString *)kSecAttrAccessGroup] = _accessGroup;
-#endif
-        
-        //check data
-        OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, NULL);
-        if (status != errSecSuccess && status != errSecItemNotFound)
-        {
-            NSLog(@"FXKeychain failed to retrieve data for key '%@', error: %ld", key, (long)status);
-        }
-        return status == errSecSuccess;
-    }
-    return NO;
 }
 
 - (NSData *)dataForKey:(id)key reason:(NSString *)reason
@@ -336,10 +267,7 @@
 #else
         BOOL authWithTouchID = NO;
 #endif
-        BOOL dataExists = NO;
         if (authWithTouchID) {
-            dataExists = [self dataExistsForKey:key secured:YES];
-            
             CFErrorRef err = NULL;
             SecAccessControlRef sacObject = SecAccessControlCreateWithFlags(kCFAllocatorDefault,
                                                                             kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly,
@@ -351,8 +279,6 @@
             update[(__bridge NSString *)kSecAttrAccessControl] = (__bridge id)sacObject;
         }
         else {
-            dataExists = [self dataExistsForKey:key secured:NO];
-            
 #if TARGET_OS_IPHONE || __MAC_OS_X_VERSION_MIN_REQUIRED >= __MAC_10_9
                 
                 update[(__bridge NSString *)kSecAttrAccessible] = @[(__bridge id)kSecAttrAccessibleWhenUnlocked,
@@ -363,31 +289,15 @@
                                                                     (__bridge id)kSecAttrAccessibleAlwaysThisDeviceOnly][self.accessibility];
 #endif
         }
-            
-        if (dataExists)
-        {
-			//there's already existing data for this key, update it
-			status = SecItemUpdate((__bridge CFDictionaryRef)query, (__bridge CFDictionaryRef)update);
-		}
-        else
-        {
-			//no existing data, add a new item
-            [query addEntriesFromDictionary:update];
-			status = SecItemAdd ((__bridge CFDictionaryRef)query, NULL);
-		}
+        
+        status = [self addSecItem:query update:update];
+        if (status == errSecDuplicateItem) {
+            status = [self updateSecItem:query update:update];
+        }
         if (status != errSecSuccess)
         {
             NSLog(@"FXKeychain failed to store data for key '%@', error: %ld", key, (long)status);
             return NO;
-        }
-        //Adding/updating new secure item
-        else if (authWithTouchID) {
-            [self addStoredKey:key];
-        }
-        //Updating from secure to insecure
-        else if (dataExists) {
-            //In case this item was previously secure, let's remove this flag
-            [self removeStoredKey:key];
         }
     }
     else if (self[key])
@@ -412,11 +322,22 @@
             NSLog(@"FXKeychain failed to delete data for key '%@', error: %ld", key, (long)status);
             return NO;
         }
-        else {
-            [self removeStoredKey:key];
-        }
     }
     return YES;
+}
+
+//no existing data, add a new item
+- (OSStatus)addSecItem:(NSDictionary *)query update:(NSDictionary *)update
+{
+    NSMutableDictionary *copy = [query mutableCopy];
+    [copy addEntriesFromDictionary:update];
+    return SecItemAdd ((__bridge CFDictionaryRef)query, NULL);
+}
+
+//there's already existing data for this key, update it
+- (OSStatus)updateSecItem:(NSDictionary *)query update:(NSDictionary *)update
+{
+    return SecItemUpdate((__bridge CFDictionaryRef)query, (__bridge CFDictionaryRef)update);
 }
 
 - (BOOL)setObject:(id)object forKeyedSubscript:(id)key
