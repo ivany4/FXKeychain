@@ -149,10 +149,12 @@
     query[(__bridge NSString *)kSecMatchLimit] = (__bridge id)kSecMatchLimitOne;
     query[(__bridge NSString *)kSecReturnData] = (__bridge id)kCFBooleanFalse;
     query[(__bridge NSString *)kSecAttrAccount] = [key description];
-    query[(__bridge NSString *)kSecUseNoAuthenticationUI] = (__bridge id)kCFBooleanTrue;
     
     
 #if TARGET_OS_IPHONE && !TARGET_IPHONE_SIMULATOR
+    if (NSFoundationVersionNumber > NSFoundationVersionNumber_iOS_7_1) {
+        query[(__bridge NSString *)kSecUseNoAuthenticationUI] = (__bridge id)kCFBooleanTrue;
+    }
     if ([_accessGroup length]) query[(__bridge NSString *)kSecAttrAccessGroup] = _accessGroup;
 #endif
     
