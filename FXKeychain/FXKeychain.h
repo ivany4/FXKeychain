@@ -85,7 +85,7 @@ typedef NS_ENUM(NSInteger, FXKeychainAccess)
 //TouchID
 #if TARGET_OS_IPHONE
 - (BOOL)setObject:(id)object forKey:(id)key protectWithTouchID:(BOOL)protect NS_AVAILABLE_IOS(8_0);
-- (id)objectForKey:(id)key reason:(NSString *)reason NS_AVAILABLE_IOS(3_0);
+- (id)objectForKey:(id)key reason:(NSString *)reason;
 #endif
 @end
 

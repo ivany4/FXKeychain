@@ -171,20 +171,8 @@
 }
 
 - (NSData *)dataForKey:(id)key reason:(NSString *)reason
-{
-    if (reason != nil) {
-#if !TARGET_OS_IPHONE
-        [NSException raise:@"NSInvalidArgumentException" format:@"TouchID reason is available only for iOS"];
-        return nil;
-#endif
-        if (NSFoundationVersionNumber <= NSFoundationVersionNumber_iOS_7_1) {
-            [NSException raise:@"NSInvalidArgumentException" format:@"TouchID reason is available only for iOS 8+"];
-            return nil;
-        }
-    }
-    
-    
-	//generate query
+{   
+    //generate query
     NSMutableDictionary *query = [NSMutableDictionary dictionary];
     if ([self.service length]) query[(__bridge NSString *)kSecAttrService] = self.service;
     query[(__bridge NSString *)kSecClass] = (__bridge id)kSecClassGenericPassword;
