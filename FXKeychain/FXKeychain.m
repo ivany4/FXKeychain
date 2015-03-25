@@ -148,7 +148,6 @@
     query[(__bridge NSString *)kSecClass] = (__bridge id)kSecClassGenericPassword;
     query[(__bridge NSString *)kSecMatchLimit] = (__bridge id)kSecMatchLimitOne;
     query[(__bridge NSString *)kSecReturnData] = (__bridge id)kCFBooleanFalse;
-    query[(__bridge NSString *)kSecReturnAttributes] = (__bridge id)kCFBooleanTrue;
     query[(__bridge NSString *)kSecAttrAccount] = [key description];
     query[(__bridge NSString *)kSecUseNoAuthenticationUI] = (__bridge id)kCFBooleanTrue;
     
