@@ -139,6 +139,38 @@
     return self;
 }
 
+- (BOOL)dataExistsForKey:(id)key
+{
+    //This can be the case when creating/updating secured key, or updating from secured key to unsecured key
+    //generate query
+    NSMutableDictionary *query = [NSMutableDictionary dictionary];
+    if ([self.service length]) query[(__bridge NSString *)kSecAttrService] = self.service;
+    query[(__bridge NSString *)kSecClass] = (__bridge id)kSecClassGenericPassword;
+    query[(__bridge NSString *)kSecMatchLimit] = (__bridge id)kSecMatchLimitOne;
+    query[(__bridge NSString *)kSecReturnData] = (__bridge id)kCFBooleanFalse;
+    query[(__bridge NSString *)kSecReturnAttributes] = (__bridge id)kCFBooleanTrue;
+    query[(__bridge NSString *)kSecAttrAccount] = [key description];
+    query[(__bridge NSString *)kSecUseNoAuthenticationUI] = (__bridge id)kCFBooleanTrue;
+    
+    
+#if TARGET_OS_IPHONE && !TARGET_IPHONE_SIMULATOR
+    if ([_accessGroup length]) query[(__bridge NSString *)kSecAttrAccessGroup] = _accessGroup;
+#endif
+    
+    //check data
+    OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, NULL);
+    if (status == errSecSuccess || status == errSecInteractionNotAllowed) {
+        return YES;
+    }
+    else if (status == errSecItemNotFound) {
+        return NO;
+    }
+    else {
+        NSLog(@"FXKeychain failed to retrieve data for key '%@', error: %ld", key, (long)status);
+        return NO;
+    }
+}
+
 - (NSData *)dataForKey:(id)key reason:(NSString *)reason
 {
     if (reason != nil) {
@@ -276,7 +308,7 @@
                 NSLog(@"FXKeychain failed to create access control object, error: %@", err);
                 return NO;
             }
-            update[(__bridge NSString *)kSecAttrAccessControl] = (__bridge id)sacObject;
+            update[(__bridge NSString *)kSecAttrAccessControl] = CFBridgingRelease(sacObject);
         }
         else {
 #if TARGET_OS_IPHONE || __MAC_OS_X_VERSION_MIN_REQUIRED >= __MAC_10_9
@@ -286,13 +318,25 @@
                                                                     (__bridge id)kSecAttrAccessibleAlways,
                                                                     (__bridge id)kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
                                                                     (__bridge id)kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
-                                                                    (__bridge id)kSecAttrAccessibleAlwaysThisDeviceOnly][self.accessibility];
+                                                                    (__bridge id)kSecAttrAccessibleAlwaysThisDeviceOnly,
+                                                                    (__bridge id)kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly][self.accessibility];
 #endif
         }
         
-        status = [self addSecItem:query update:update];
-        if (status == errSecDuplicateItem) {
-            status = [self updateSecItem:query update:update];
+        if ([self dataExistsForKey:key]) {
+            if (authWithTouchID && [[[UIDevice currentDevice] systemName] floatValue] == 8.0) {
+                //Workaround for https://developer.apple.com/library/ios/releasenotes/General/RN-iOSSDK-8.0/
+                status = SecItemDelete((__bridge CFDictionaryRef)query);
+                if (status == errSecSuccess) {
+                    status = [self addSecItem:query update:update];
+                }
+            }
+            else {
+                status = [self updateSecItem:query update:update];
+            }
+        }
+        else {
+            status = [self addSecItem:query update:update];
         }
         if (status != errSecSuccess)
         {
@@ -331,7 +375,7 @@
 {
     NSMutableDictionary *copy = [query mutableCopy];
     [copy addEntriesFromDictionary:update];
-    return SecItemAdd ((__bridge CFDictionaryRef)query, NULL);
+    return SecItemAdd ((__bridge CFDictionaryRef)copy, NULL);
 }
 
 //there's already existing data for this key, update it

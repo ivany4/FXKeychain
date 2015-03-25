@@ -56,7 +56,8 @@ typedef NS_ENUM(NSInteger, FXKeychainAccess)
     FXKeychainAccessibleAlways,
     FXKeychainAccessibleWhenUnlockedThisDeviceOnly,
     FXKeychainAccessibleAfterFirstUnlockThisDeviceOnly,
-    FXKeychainAccessibleAlwaysThisDeviceOnly
+    FXKeychainAccessibleAlwaysThisDeviceOnly,
+    FXKeychainAccessibleWhenPasscodeSetThisDeviceOnly
 };
 
 
