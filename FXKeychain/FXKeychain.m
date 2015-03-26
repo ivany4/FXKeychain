@@ -109,13 +109,21 @@
         sharedInstance = [[FXKeychain alloc] initWithService:bundleID
                                                  accessGroup:nil];
     });
-
+    
     return sharedInstance;
 }
 
 - (id)init
 {
     return [self initWithService:nil accessGroup:nil];
+}
+
+- (void)setAccessibility:(FXKeychainAccess)accessibility
+{
+    if (accessibility == FXKeychainAccessibleWhenPasscodeSetThisDeviceOnly && NSFoundationVersionNumber <= NSFoundationVersionNumber_iOS_7_1) {
+        [NSException raise:@"Invalid Argument" format:@"FXKeychainAccessibleWhenPasscodeSetThisDeviceOnly is availble on iOS8+ only"];
+    }
+    _accessibility = accessibility;
 }
 
 - (id)initWithService:(NSString *)service
@@ -173,7 +181,7 @@
 }
 
 - (NSData *)dataForKey:(id)key reason:(NSString *)reason
-{   
+{
     //generate query
     NSMutableDictionary *query = [NSMutableDictionary dictionary];
     if ([self.service length]) query[(__bridge NSString *)kSecAttrService] = self.service;
@@ -182,7 +190,7 @@
     query[(__bridge NSString *)kSecReturnData] = (__bridge id)kCFBooleanTrue;
     query[(__bridge NSString *)kSecAttrAccount] = [key description];
     
-
+    
 #if TARGET_OS_IPHONE && !TARGET_IPHONE_SIMULATOR
     if (NSFoundationVersionNumber > NSFoundationVersionNumber_iOS_7_1 && reason) {
         query[(__bridge NSString *)kSecUseOperationPrompt] = reason;
@@ -202,11 +210,11 @@
     else if (status == errSecAuthFailed) {
         NSLog(@"FXKeuchain user auth failed");
     }
-	else if (status != errSecSuccess && status != errSecItemNotFound)
+    else if (status != errSecSuccess && status != errSecItemNotFound)
     {
-		NSLog(@"FXKeychain failed to retrieve data for key '%@', error: %ld", key, (long)status);
-	}
-	return CFBridgingRelease(data);
+        NSLog(@"FXKeychain failed to retrieve data for key '%@', error: %ld", key, (long)status);
+    }
+    return CFBridgingRelease(data);
 }
 
 - (BOOL)setObject:(id)object forKey:(id)key
@@ -229,7 +237,7 @@
             return NO;
         }
     }
-
+    
     //generate query
     NSMutableDictionary *query = [NSMutableDictionary dictionary];
     if ([self.service length]) query[(__bridge NSString *)kSecAttrService] = self.service;
@@ -277,17 +285,17 @@
 #endif
         
     }
-
+    
     //fail if object is invalid
     NSAssert(!object || (object && data), @"FXKeychain failed to encode object for key '%@', error: %@", key, error);
-
+    
     if (data)
     {
         //update values
         NSMutableDictionary *update = [@{(__bridge NSString *)kSecValueData: data} mutableCopy];
         
         //write data
-		OSStatus status = errSecSuccess;
+        OSStatus status = errSecSuccess;
         
         //Don't read item protected by TouchID, since it will bring the UI for authentication...
 #if TARGET_OS_IPHONE && !TARGET_IPHONE_SIMULATOR
@@ -308,7 +316,7 @@
         }
         else {
 #if TARGET_OS_IPHONE || __MAC_OS_X_VERSION_MIN_REQUIRED >= __MAC_10_9
-                
+            if (NSFoundationVersionNumber > NSFoundationVersionNumber_iOS_7_1) {
                 update[(__bridge NSString *)kSecAttrAccessible] = @[(__bridge id)kSecAttrAccessibleWhenUnlocked,
                                                                     (__bridge id)kSecAttrAccessibleAfterFirstUnlock,
                                                                     (__bridge id)kSecAttrAccessibleAlways,
@@ -316,6 +324,15 @@
                                                                     (__bridge id)kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
                                                                     (__bridge id)kSecAttrAccessibleAlwaysThisDeviceOnly,
                                                                     (__bridge id)kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly][self.accessibility];
+            }
+            else {
+                update[(__bridge NSString *)kSecAttrAccessible] = @[(__bridge id)kSecAttrAccessibleWhenUnlocked,
+                                                                    (__bridge id)kSecAttrAccessibleAfterFirstUnlock,
+                                                                    (__bridge id)kSecAttrAccessibleAlways,
+                                                                    (__bridge id)kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+                                                                    (__bridge id)kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+                                                                    (__bridge id)kSecAttrAccessibleAlwaysThisDeviceOnly][self.accessibility];
+            }
 #endif
         }
         
@@ -430,14 +447,14 @@
             {
                 //data represents an NSCoded archive
                 
-    #if FXKEYCHAIN_USE_NSCODING
+#if FXKEYCHAIN_USE_NSCODING
                 
                 //parse as archive
                 object = [NSKeyedUnarchiver unarchiveObjectWithData:data];
-    #else
+#else
                 //don't trust it
                 object = nil;
-    #endif
+#endif
                 
             }
         }
@@ -448,7 +465,7 @@
         }
         if (!object)
         {
-             NSLog(@"FXKeychain failed to decode data for key '%@', error: %@", key, error);
+            NSLog(@"FXKeychain failed to decode data for key '%@', error: %@", key, error);
         }
         return object;
     }

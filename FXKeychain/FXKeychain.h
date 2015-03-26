@@ -57,7 +57,7 @@ typedef NS_ENUM(NSInteger, FXKeychainAccess)
     FXKeychainAccessibleWhenUnlockedThisDeviceOnly,
     FXKeychainAccessibleAfterFirstUnlockThisDeviceOnly,
     FXKeychainAccessibleAlwaysThisDeviceOnly,
-    FXKeychainAccessibleWhenPasscodeSetThisDeviceOnly
+    FXKeychainAccessibleWhenPasscodeSetThisDeviceOnly NS_AVAILABLE_IOS(8_0)
 };
 
 
