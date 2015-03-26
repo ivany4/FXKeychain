@@ -195,7 +195,14 @@
     //recover data
     CFDataRef data = NULL;
     OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, (CFTypeRef *)&data);
-	if (status != errSecSuccess && status != errSecItemNotFound)
+    
+    if (status == errSecUserCanceled) {
+        NSLog(@"FXKeychain user cancelled operation");
+    }
+    else if (status == errSecAuthFailed) {
+        NSLog(@"FXKeuchain user auth failed");
+    }
+	else if (status != errSecSuccess && status != errSecItemNotFound)
     {
 		NSLog(@"FXKeychain failed to retrieve data for key '%@', error: %ld", key, (long)status);
 	}
@@ -327,7 +334,14 @@
         else {
             status = [self addSecItem:query update:update];
         }
-        if (status != errSecSuccess)
+        
+        if (status == errSecUserCanceled) {
+            NSLog(@"FXKeychain user cancelled operation");
+        }
+        else if (status == errSecAuthFailed) {
+            NSLog(@"FXKeuchain user auth failed");
+        }
+        else if (status != errSecSuccess)
         {
             NSLog(@"FXKeychain failed to store data for key '%@', error: %ld", key, (long)status);
             return NO;
@@ -350,7 +364,13 @@
             CFRelease(result);
         }
 #endif
-        if (status != errSecSuccess)
+        if (status == errSecUserCanceled) {
+            NSLog(@"FXKeychain user cancelled operation");
+        }
+        else if (status == errSecAuthFailed) {
+            NSLog(@"FXKeuchain user auth failed");
+        }
+        else if (status != errSecSuccess)
         {
             NSLog(@"FXKeychain failed to delete data for key '%@', error: %ld", key, (long)status);
             return NO;
